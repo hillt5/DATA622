@@ -1,0 +1,343 @@
+---
+title: "DATA 622: Homework 1"
+author: "Thomas Hill"
+date: "March 17, 2022"
+output:
+  html_document:
+    highlight: pygments
+    number_sections: no
+    theme: flatly
+    toc: yes
+    toc_float: yes
+  pdf_document:
+    toc: TRUE
+    toc_depth: 2 
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, fig.align = "center")
+```
+
+```{r libraries, include=FALSE}
+
+library(dplyr)
+library(ggplot2)
+library(lubridate)
+library(tree)
+library(BBmisc)
+library(dummies)
+library(class)
+```
+
+As the quiz that was part of the original content was discarded, here's a new assignment:
+
+Visit the following website and explore the range of sizes of this data set (from 100 to 5 million records).
+https://eforexcel.com/wp/downloads-18-sample-csv-files-data-sets-for-testing-sales/ 
+Based on your computer's capabilities (memory, CPU), select 2 files you can handle (recommended one small, one large)
+
+Review the structure and content of the tables, and think which two machine learning algorithms presented so far could be used to analyze the data, and how can they be applied in the suggested environment of the data sets.
+
+Write a short essay explaining your selection. Then, select one of the 2 algorithms and explore how to analyze and predict an outcome based on the data available. This will be an exploratory exercise, so feel free to show errors and warnings that raise during the analysis. Test the code with both data sets selected and compare the results. Which result will you trust if you need to make a business decision? Do you think an analysis could be prone to errors when using too much data, or when using the least amount possible?
+
+Develop your exploratory analysis of the data and the essay in the following 2 weeks. You'll have until March 17 to submit both.
+
+## Datasets
+
+```{r, csv}
+
+small_df <- read.csv("~/GitHub/DATA622/5000_Sales_Records.csv", stringsAsFactors = TRUE)
+small_df$Order.Date <- as.Date(small_df$Order.Date, format = '%m/%d/%Y')
+small_df$Ship.Date <- as.Date(small_df$Order.Date, format = '%m/%d/%Y')
+big_df <- read.csv("~/GitHub/DATA622/50000_Sales_Records.csv", stringsAsFactors =  TRUE)
+big_df$Order.Date <- as.Date(small_df$Order.Date, format = '%m/%d/%Y')
+big_df$Ship.Date <- as.Date(small_df$Order.Date, format = '%m/%d/%Y')
+```
+
+
+
+```{r, summary}
+
+
+summary(small_df)
+colnames(small_df)
+
+
+```
+
+
+Each data set generates random observations with the following 14 characteristics: an order ID and order/ship dates, the region and country of the order, the item type and order priority as well as whether it was ordered online or offline. There is also a number of units sold row, as well as 5 rows dedicated to pricing. The number of units sold varies between 2 and a maximum of 9999
+
+```{r, unique-levels}
+length(unique(levels(small_df$Country)))
+length(unique(levels(small_df$Item.Type)))
+```
+
+```{r, date-range}
+
+min(small_df$Order.Date)
+max(small_df$Order.Date)
+
+
+
+max(small_df$Order.Date) - min(small_df$Order.Date)
+2765/365
+```
+
+There are 185 countries included, and 12 item types. The dates range between 2010 and 2017, or about 7 years.
+
+
+
+```{r, plot}
+
+
+small_df %>%
+  ggplot(aes(Order.Date, Total.Profit)) +
+  geom_line(alpha = 0.5) +
+  geom_smooth(fill ='blue') +
+  labs(title ='Total Profit, All Years')
+
+small_df %>%
+  filter(Order.Date >= '2010-01-01' & Order.Date <= '2010-12-31') %>%
+  ggplot(aes(Order.Date, Total.Profit)) +
+  geom_line(alpha = 0.5) +
+  geom_smooth(fill = 'blue') +
+  labs(title ='Total Profit, 2010')
+
+
+graph_df <- small_df %>%
+  mutate(year = as.factor(year(Order.Date))) %>%
+  mutate(monthN = as.numeric(month(Order.Date))) %>%
+  mutate(month_name = months(as.Date(Order.Date, abbreviate = TRUE))) %>%
+  group_by(monthN, year) %>%
+  summarize(monthly_profit = sum(Total.Profit))
+
+ggplot(graph_df, aes(monthN, monthly_profit, col = year)) +
+  geom_point() +
+  geom_line() +
+  scale_x_continuous(breaks = 1:12) +
+  labs(title = 'Monthly Profit, year-on-year')
+
+
+
+
+```
+
+There don't appear to be any year-on-year patterns with respect to profit.
+
+
+```{r, processing-time}
+
+
+small_df %>%
+  mutate(processing_time = Ship.Date - Order.Date) %>%
+  summarize(mean(processing_time))
+
+
+
+
+```
+
+Also, it appears that shipping date and order date are always the same.
+
+```{r, unique-vals}
+
+length(unique(small_df$Unit.Price))
+length(unique(small_df$Unit.Cost))
+
+small_df %>%
+  mutate(revenue_calc = Units.Sold*Unit.Price) %>%
+  mutate(revenue_test = round(revenue_calc,0) == round(Total.Revenue,0)) %>%
+  summarize(sum(revenue_test))
+  
+small_df %>%
+  mutate(cost_calc = Units.Sold*Unit.Cost) %>%
+  mutate(cost_test = round(cost_calc,0) == round(Total.Cost,0)) %>%
+  summarize(sum(cost_test))
+
+small_df %>%
+  mutate(profit_calc = Total.Revenue-Total.Cost) %>%
+  mutate(profit_test = round(profit_calc,0) == round(Total.Profit,0)) %>%
+  summarize(sum(profit_test))
+
+```
+
+
+The last 5 columns related to cost and revenue are all derived from the units sold and the item type. The unit price and cost have 12 different unique values similar to item type. Additionally, the totals for cost, revenue, and profit are all derived from these values, with nearly all of these variables can be recalculated using some accounting arithmetic. It's assumed that these descriptions are true for the larger data set as well.
+
+
+```{r, potential-measures}
+
+
+plot(small_df$Order.Priority)
+plot(small_df$Item.Type)
+hist(small_df$Units.Sold)
+hist(small_df$Total.Profit)
+```
+
+Finally, lets look at the distribution of several columns. It appears that the number of units sold, priority, and item type are all uniformly distributed. Meanwhile, total profit, in addition to cost and revenue, is skewed to the right.
+
+## Machine Learning Algorithms
+
+
+Because many of these variables are derived from each other, the machine learning should instead try to predict something that hasn't already been derived during an exploratory analysis. To illustrate this, I've used a simple linear model to model the total profit using the small data frame.
+
+```{r, add-dates}
+
+small_fix <-  small_df %>%
+  mutate(year = as.factor(year(Order.Date))) %>% #add year as variable
+  mutate(monthN = as.factor(month(Order.Date)))  #add month as variable
+
+```
+
+
+```{r, linear-model}
+
+simple_model <- lm(data = small_fix, Total.Profit ~Item.Type*Units.Sold)
+
+summary(simple_model)
+round((simple_model$coefficients),2)
+
+```
+
+Using all data points, the R-squared is 1, or completely correlated to just two variables. Next lets use that model to predict values using the larger dataframe.
+
+
+
+```{r, simple-model-big-df}
+
+sum((predict(simple_model, big_df[-14]) - big_df[14])^2)
+```
+
+In this case the RSS is very small, indicating that the same relationship exists between units sold and unit price. 
+
+
+Instead, it makes more sense to model the amount of units sold based on the remaining variables. As already illustrated, units sold is uniformly distributed between 1 and 9999. Because of this, it might make more sense to break units sold into a half-dozen categories spanning the whole data set, incremented by 2000 units. 
+
+```{r, }
+
+small_fix <- small_fix %>%
+  mutate(unit_cat = cut(Units.Sold, breaks = c(0, 1999, 3999, 5999, 8999, 9999)))
+
+```
+
+
+There are a few options to predict the order size category. My first thought was to use decision trees as I just changed the outcome variable to something categorical. Decision trees are easily understood by laypeople and could offer some insight into the most important determinants of order size. However, after trying to fit a tree to this data 
+Using decision trees would be useful  In many cases, it would be easier to turn this into a classification problem after deciding an acceptable profit level (e.g., greater than $500,000 monthly). There's a second technique for continuous outcomes. however called a regression tree that could be applied to this case. This may be able to provide an opportunity to predict the value of profit.
+
+
+
+
+
+```{r, small-df-split}
+
+set.seed(0317)
+
+sample_set <- sample(nrow(small_fix), round(nrow(small_fix)*.75), replace = FALSE)
+small_train <- small_fix[sample_set, ]
+small_test <- small_fix[-sample_set, ]
+
+
+```
+
+
+
+```{r, small-tree-model}
+
+
+tree.small <- tree(data = small_train, unit_cat ~ Region + Item.Type + Sales.Channel + Order.Priority + year + monthN )
+
+summary(tree.small)
+
+```
+
+The training data creates a very simple tree with a misclassification rate of 0.699. This model does not appear to be appropriate for these data.
+
+
+
+```{r, small-predict}
+
+small_pred <- predict(tree.small, small_test, type = 'class')
+
+
+small_table <- table(small_test$unit_cat, small_pred)
+
+
+small_table
+```
+
+On closer inspection, this is because only one bin is being predicted. For a second machine learning technique, I'll attempt using an unsupervised technique like kNN. This will require creating dummy variables for all categorical variables, potentially lowering performance by increasing variables.
+
+
+
+```{r,normalize-dummy-small}
+
+
+
+small_norm <- normalize(small_fix[-c(2,6,7,8,17)]) #removed dates, ID, as well as country factor
+small_norm <- dummy.data.frame(small_norm, sep = '_')
+
+sample_set <- sample(nrow(small_norm), round(nrow(small_fix)*.75), replace = FALSE)
+small_train <- small_norm[sample_set,-17]
+small_test <- small_norm[-sample_set,-17]
+small_train_labels <- as.factor(small_fix[sample_set, 17])
+small_test_labels <- as.factor(small_fix[-sample_set, 17])
+
+
+summary(small_train)
+```
+
+The addition of dummy variables has increased the number of variables present to 56.
+
+
+```{r, kNN-small}
+
+small_knn <- knn(small_train[-c(28,29,30)], small_test[-c(28,29,30)], cl = small_train_labels, k = 5) #removed variables easily derived from units sold
+
+small_k_table <- table(small_test_labels, small_knn)
+
+print(small_k_table)
+
+sum(diag(small_k_table)) / nrow(small_test)
+```
+
+Using kNN, units sold could be predicted accurately in 70% of cases. This is on the lower limit of what's considered effective classification. Looking at the confusion matrix, it appears the most common classification errors are placing an observation in the next closest observation.
+
+
+
+Next, let's do the same thing but with a larger data set.
+```{r,normalize-dummy-big}
+
+big_fix <-  big_df %>%
+  mutate(year = as.factor(year(Order.Date))) %>% #add year as variable
+  mutate(monthN = as.factor(month(Order.Date))) %>% #add month as variable 
+  mutate(unit_cat = cut(Units.Sold, breaks = c(0, 1999, 3999, 5999, 8999, 10000)))
+
+big_norm <- normalize(big_fix[-c(2,6,7,8,17)]) #removed dates, ID, as well as country factor
+big_norm <- dummy.data.frame(big_norm, sep = '_')
+
+sample_set <- sample(nrow(big_norm), round(nrow(big_fix)*.75), replace = FALSE)
+big_train <- big_norm[sample_set,]
+big_test <- big_norm[-sample_set,]
+big_train_labels <- as.factor(big_fix[sample_set, 17])
+big_test_labels <- as.factor(big_fix[-sample_set, 17])
+
+```
+
+
+
+```{r, kNN-big}
+
+
+big_knn <- knn(big_train[-c(28,29,30)], big_test[-c(28,29,30)], cl = big_train_labels, k = 5)
+
+big_k_table <- table(big_test_labels, big_knn)
+
+print(big_k_table)
+
+sum(diag(big_k_table)) / nrow(big_test)
+```
+
+Increasing the sample size by ten times only increases the accuracy by about 7%.
+
+
