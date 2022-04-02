@@ -1,0 +1,283 @@
+---
+title: "DATA622: Homework 2"
+author: "by Thomas Hill"
+output:
+
+  html_document:
+    highlight: pygments
+    number_sections: no
+    theme: cerulean
+    toc: yes
+    toc_float: yes
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, fig.align = "center")
+```
+
+```{r, library}
+
+library(dplyr)
+library(randomForest)
+library(caTools)
+library(ggplot2)
+library(tree)
+library(gbm)
+
+```
+
+
+Based on the latest topics presented, bring a data set of your choice and create a Decision Tree where you can solve a classification or regression problem and predict the outcome of a particular feature or detail of the data used.
+Switch variables to generate 2 decision trees and compare the results. Create a random forest for regression and analyze the results.
+Based on real cases where decision trees went wrong, and 'the bad & ugly' aspects of decision trees (https://decision.com/blog/the-good-the-bad-the-ugly-of-using-decision-trees), how can you change this perception when using the decision tree you created to solve a real problem?
+
+Format: document with screen captures & analysis.
+
+
+
+```{r, csv}
+
+aaa_df <- read.csv('~/GitHub/DATA622/Absenteeism_at_work.csv', sep = ';', colClasses=c(rep("factor",5), rep('numeric', 6), rep('factor', 2), 'numeric', rep('factor', 2), rep('numeric', 5)))
+```
+
+
+For this week's homework, I'm using UCI ML's 'Absenteeism' data set. This data set has information about callouts in a Brazilian firm over a 3 year period.
+
+```{r,}
+nrow(aaa_df)
+summary(aaa_df)
+
+head(aaa_df)
+```
+
+Including the outcome variable, there are 21 columns and 740 observations. 
+
+
+```{r, unique-vals}
+
+length(unique((aaa_df$ID)))
+sort(unique((aaa_df$Absenteeism.time.in.hours)))
+
+
+```
+
+The data description mentions that there are 28 different reasons for callouts, with 21 of them being medical information and the last seven being miscellaneous. Additionally, there are 36 total workers monitored, with several observations for each worker. Finally, it appears that missing time in hours spans partial days (0-8 hours), as well as multiple days (16 hours = 2 days). My interpretation of this is outcomes greater than 8 are when workers called out multiple days in a row, with each observation being a single span of callouts. What isn't immediately clear is what observations with absenteeism of 'zero' describe.
+
+```{r, missing values}
+
+aaa_df %>%
+  filter(Month.of.absence == 0)
+aaa_df %>%
+  filter(ID %in% c(4,8,35))
+
+aaa_df %>%
+  filter(Seasons == 1) %>%
+  select(Month.of.absence) %>%
+  group_by(Month.of.absence) %>%
+  summarize(n_obs = n())
+plot(aaa_df$Seasons)
+
+aaa_df %>%
+  filter(ID == 29)
+
+aaa_df %>%
+  filter(Service.time == 9, Weight == 69) %>%
+  select(ID) %>%
+  group_by(ID) %>%
+  summarize(n_obs = n())
+
+```
+
+I also noticed that there are four observations with a month of 'zero', which doesn't make sense as a descriptor. Since these observations have a season, I'll impute the most common month of the season onto the zero values. Also, after sorting by ID, it appears that one of the observations with an ID of 29 might be miscoded. In general, it appears many of the demographic variables (age, weight, number of pets) does not change between observations. This leads me to believe that one of the observations for ID# 28 is miscoded as 29
+
+
+```{r, impute}
+
+print(aaa_df[aaa_df$Month.of.absence == 0,])
+
+aaa_df %>%
+  filter(Seasons == 1) %>%
+  select(Month.of.absence) %>%
+  group_by(Month.of.absence) %>%
+  summarize(n_obs = n()) %>%
+  arrange(n_obs)
+
+
+aaa_df[738,]$Month.of.absence = factor(7)
+
+aaa_df %>%
+  filter(Seasons == 2) %>%
+  select(Month.of.absence) %>%
+  group_by(Month.of.absence) %>%
+  summarize(n_obs = n()) %>%
+  arrange(n_obs)
+
+aaa_df[739,]$Month.of.absence = factor(3)
+
+aaa_df %>%
+  filter(Seasons == 3) %>%
+  select(Month.of.absence) %>%
+  group_by(Month.of.absence) %>%
+  summarize(n_obs = n()) %>%
+  arrange(n_obs)
+
+aaa_df[740,]$Month.of.absence = factor(4)
+
+
+print(aaa_df[aaa_df$Weight == 69,])
+
+aaa_df <- aaa_df %>%
+  group_by(Seasons) %>%
+  mutate(Month.of.absence = replace(Month.of.absence, Month.of.absence == 0, 7))
+
+aaa_df[52,]$ID = factor(28)
+
+summary(aaa_df$Month.of.absence)
+
+aaa_df %>%
+  filter(Service.time == 9, Weight == 69) %>%
+  select(ID) %>%
+  group_by(ID) %>%
+  summarize(n_obs = n())
+
+```
+
+Next, lets look at the first target variable, absenteeism in hours. I broke the target variable down into bins based on the structure of the responses. There were enough values for no callouts to be their own category, while absent days could be broken down into time off less than one day or greater than one day. I chose to group taking a full day off with taking more than one off because of the nature of callouts. Ultimately, this exercise seeks to find patterns in taking days off to detect fraudulent versus legitimate time off. Because of this, it's unlikely that someone would only work part of a day if they were doing so fraudulently. This is supported by the reasons for absence. Taking less than one day off is mostly for miscellaneous reasons, like a dentist or doctor's appointment. In contrast, taking more than one day off is more likely to be attributed to an ICD diagnosis. Finally, there is an extra value of 'zero' that was not defined as a reason for absence in the original data set description. This description is only present when the time taken off is also 'zero'. However, for the models I'll be creating regression trees that predict the number of hours given an absence.
+
+
+
+
+```{r, target-variable}
+
+
+aaa_plot <- aaa_df %>%
+  mutate(absent_bin = case_when(Absenteeism.time.in.hours == 0 ~ 'Zero', Absenteeism.time.in.hours >= 8 ~ 'One day or more', Absenteeism.time.in.hours > 0 & Absenteeism.time.in.hours < 8 ~ 'Less than 1 day')) %>%
+  mutate(absent_bin = factor(absent_bin, ordered = TRUE, levels = c('Zero', 'Less than 1 day', 'One day or more'))) %>%
+  dplyr:: select(-Absenteeism.time.in.hours)
+
+ggplot(aaa_plot, aes(x = absent_bin)) +
+  geom_bar(aes(fill = Reason.for.absence)) +
+  coord_flip()
+
+```
+
+## Modeling the Data
+
+```{r, train-test-split}
+set.seed(0403)
+
+sample <- sample.split(1:nrow(aaa_df), SplitRatio = 0.8)
+
+train <- subset(aaa_df, sample == TRUE)
+test <- subset(aaa_df, sample == FALSE)
+```
+
+### Absenteeism
+
+
+
+For the first variable, I'm using the intended outcome variable of absenteeism in hours. I had to omit the 'ID' column as this is too many variables for the 'tree' function to consider.
+
+```{r, dt-1}
+
+
+tree1 <- tree(Absenteeism.time.in.hours~.-ID, data=train)
+
+plot(tree1)
+text(tree1)
+
+summary(tree1)
+
+```
+
+The decision tree model creates a tree with 14 nodes total. The most important nodes are the reasons for absence, as well as height and month of absence.
+
+```{r, dt1-performance}
+
+dt1_pred <- predict(tree1, data = test)
+
+sum((test$Absenteeism.time.in.hours - dt1_pred)^2)/(740-14) #RSS divided by the observations minus terminal nodes
+
+```
+
+The test performance is slightly worse, at 242 versus 81.
+
+
+```{r,rf-1}
+
+
+aa1.rf <- randomForest(Absenteeism.time.in.hours~.-ID, data = train, mtry = 3, importance = TRUE, na.action = na.omit)
+
+print(aa1.rf)
+head(importance(aa1.rf))
+```
+
+The random forest model creates a much smaller tree with 3 nodes. The training set has slightly worse performance than the original decision tree. The most important variable, reason for absence, remains the same, while the timing of absence is more important in this case.
+
+
+```{r, rf1-performance}
+
+rf1_pred <- predict(aa1.rf, data = test)
+
+sum((test$Absenteeism.time.in.hours - rf1_pred)^2)/(740-3) #RSS divided by the observations minus terminal nodes
+
+```
+
+Test performance is actually better using the random forest model for this outcome.
+
+
+
+### Disciplinary Action
+
+The second feature is less complicated than the intended target variable, which is the presence or absence of disciplinary action. 
+
+```{r, dt-2}
+
+
+tree2 <- tree(Disciplinary.failure~.-ID, data=train)
+
+plot(tree2)
+text(tree2)
+
+summary(tree2)
+
+```
+
+
+Its decision tree is much simpler, with only 3 terminal nodes. The only variables considered are reasons for absence and its month. Misclassification is less than 1%.
+
+```{r, dt2-performance}
+
+dt2_pred <- predict(tree2, test, type = 'class')
+
+table(dt2_pred, test$Disciplinary.failure) #confusion matrix
+
+```
+For the test set, all classes are correctly predicted.
+
+```{r,rf-2}
+
+
+rf2.rf <- randomForest(Disciplinary.failure~.-ID, data = train, mtry = 3, importance = TRUE, na.action = na.omit)
+
+print(rf2.rf)
+
+```
+
+```{r, rf2-performance}
+
+rf2_pred <- predict(rf2.rf, test, type = 'class')
+
+table(rf2_pred, test$Disciplinary.failure)
+```
+
+The random forest model performed almost identically to the decision tree for the sample outcome variable.
+
+
+## Analysis
+
+Looking at the more complicated variable, absenteeism, the decision trees generated were more complicated and offered more repeated nodes considering the same variable. By contrast, the corresponding random forest was a much smaller and performed better on the test set. Decision trees appear to overfit to the data they're exposed to. In the second variable, which was a binary yes/no of whether disciplinary action took place, the models were nearly identical. Since the appeal of tree-based models is their interpretability, random forests provide a quicker look at the important variables in a potential model.
+
+One aspect that was not mentioned as well is decision trees suffer when there is class imbalance. For instance, for disciplinary action there were only 40 instances of when it was observed. This means there was a 19:1 ratio of available classes. Similar to logistic regression, sampling methods need to compensate for this mismatch if we're interested in predicting an uncommon event. This may mean that the models for the second variable are not actually as accurate as advertised. 
+
