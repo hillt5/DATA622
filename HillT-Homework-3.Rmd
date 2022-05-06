@@ -1,0 +1,114 @@
+---
+title: "DATA622: Homework 3"
+author: "by Thomas Hill"
+output:
+
+  html_document:
+    highlight: pygments
+    number_sections: no
+    theme: cerulean
+    toc: yes
+    toc_float: yes
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo=FALSE, error=FALSE, warning=FALSE, message=FALSE, fig.align = "center")
+```
+
+Perform an analysis of the dataset used in Homework #2 using the SVM algorithm. Compare the results with the results from previous homework.
+
+```{r, libraries}
+
+library(e1071)
+library(dplyr)
+library(caret)
+library(caTools)
+
+```
+
+
+```{r, csv}
+
+aaa_df <- read.csv('~/GitHub/DATA622/Absenteeism_at_work.csv', sep = ';', colClasses=c(rep("factor",5), rep('numeric', 6), rep('factor', 2), 'numeric', rep('factor', 2), rep('numeric', 5)))
+```
+
+
+For this week's homework, I'm using UCI ML's 'Absenteeism' data set. This data set has information about callouts in a Brazilian firm over a 3 year period.
+
+```{r, preprocessing}
+aaa_df[738,]$Month.of.absence = factor(7) #impute to most common months
+aaa_df[739,]$Month.of.absence = factor(3)
+aaa_df[740,]$Month.of.absence = factor(4)
+aaa_df <- aaa_df %>%
+  group_by(Seasons) %>%
+  mutate(Month.of.absence = replace(Month.of.absence, Month.of.absence == 0, 7)) #impute to most common month
+aaa_df[52,]$ID = factor(28) #correct ID
+```
+
+
+
+
+
+
+```{r, train-test-split}
+set.seed(0424)
+
+sample <- sample.split(1:nrow(aaa_df), SplitRatio = 0.8)
+train <- subset(aaa_df, sample == TRUE)
+test <- subset(aaa_df, sample == FALSE)
+```
+
+
+```{r, scale-dummies-train}
+
+scale <- sapply(train, function(i) if(is.numeric(i)) scale(i) else i)
+
+dummies <- dummyVars(~., scale[,-20])
+
+d_predict <- predict(dummies, train[,-20])
+dummies_train <- as.data.frame(cbind(train$Absenteeism.time.in.hours, d_predict)) %>%
+  select(-Month.of.absence0) #this factor level is not used
+
+```
+
+
+```{r, scale-dummies-test}
+
+scale <- sapply(test, function(i) if(is.numeric(i)) scale(i) else i)
+
+dummies <- dummyVars(~., scale[,-21])
+
+d_predict <- predict(dummies, test[,-21])
+dummies_test <- as.data.frame(cbind(test$Absenteeism.time.in.hours, d_predict)) %>%
+  select(-Month.of.absence0) #this factor level is not used
+
+```
+
+
+
+```{r, svm-model}
+
+s_mod1 <- svm(dummies_train[,-1], dummies_train$V1)
+
+
+svm1 <- predict(s_mod1, dummies_test[,-1])
+
+summary(svm1)
+```
+
+```{r, svm-performance}
+
+summary(s_mod1)
+
+mean(s_mod1$residuals^2)
+```
+
+The performance of SVM on these training data is better than the random forest model in Homework 2 but slightly worse than the more complicated decision tree model
+
+
+
+
+
+
+

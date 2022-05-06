@@ -1,0 +1,205 @@
+---
+title: "DATA622: Homework 4"
+author: "by Thomas Hill"
+output:
+
+  html_document:
+    highlight: pygments
+    number_sections: no
+    theme: cerulean
+    toc: yes
+    toc_float: yes
+---
+
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r, libs}
+
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(InformationValue)
+library(ROSE)
+```
+  
+
+You get to decide which dataset you want to work on. The data set must be different You can work on a problem from your work, or something you are interested in. You may also obtain a dataset from sites such as Kaggle, Data.Gov, Census Bureau, USGS or other open data portal. 
+
+Select one of the methodologies studied in weeks 1-10, and one methodology from weeks 11-15 to apply in the new dataset selected. To complete this task:. 
+- Describe the problem you are trying to solve.
+- Describe your dataset and what you did to prepare the data for analysis. 
+- Methodologies you used for analyzing the data
+- Why you did what you did
+- Make your conclusions from your analysis. Please be sure to address the business impact (it could be of any domain) of your solution.
+
+Your final presentation could be the traditional R file and essay, or it could be an oral presentation with the execution and explanation of your code, recorded on any platform of your choice (Youtube, Free Cam). If you select the presentation, it should be a 5 to 8 minutes recording. 
+
+## Problem
+
+For this project, I'm planning on comparing several of the more advanced machine learning techniques along with replicating the results of the original paper comparing naive Bayes and logistic regression. The task at hand is prediction of cervical cancer given using over a dozen patient features. Risk stratification is an important part of medicine as diagnosing an illness has costs and risks, which can be further exacerbated by the presence of false positive and negative results. Cervical cancer in particular is a unique cases because some of its most common manifestations are infectious in origin and can be prevented by immunization. 
+
+## Dataset
+
+The dataset I'm using is available through UCI's Machine Learning Repository. These data originate from a 2026 paper entitled _Behavior Determinant based Cervical Cancer Early Detection with Machine Learning Algorithm_. The features are a set of 18 attributes representing 7 larger behavioral determinants of illness: behavior, intention, attitude, norm, perception, social support, and empowerment. These refer to four competing models of the psychological perception of health and illness. These dimensions of behavior were part of a questionaire with nine questions per variable. I've described the variables further in the table 1.
+
+
+
+
+
+
+
+## Methods
+
+
+```{r, sobar-csv}
+
+
+cc_df <- read.csv('sobar-72.csv')
+
+unique(cc_df$behavior_sexualRisk)
+
+
+
+
+```
+
+
+```{r, cc-scale-cor}
+cc_scale <- cc_df %>%
+  select(-ca_cervix) %>%
+  mutate_all(scale)
+
+
+corrplot::corrplot(cor(cc_scale), diag = T)
+
+
+pca <- (prcomp(cc_df[-20], center =  TRUE, scale = TRUE))
+summary(pca)
+
+
+
+```
+
+
+
+```{r, total-cols}
+
+cc_tots <- cc_df %>% 
+  rowwise() %>%
+  mutate(total_behavior = sum(behavior_sexualRisk, behavior_eating, behavior_personalHygine)) %>%
+  mutate(total_intention = sum(intention_aggregation, intention_commitment)) %>%
+  mutate(total_attitude = sum(attitude_consistency, attitude_spontaneity)) %>%
+  mutate(total_norm = sum(norm_significantPerson, norm_fulfillment)) %>%
+  mutate(total_perception = sum(perception_severity, perception_severity)) %>%
+  mutate(total_motivation = sum(motivation_strength, motivation_willingness)) %>%
+  mutate(total_social = sum(socialSupport_emotionality, socialSupport_appreciation, socialSupport_instrumental)) %>%
+  mutate(total_empowerment = sum(empowerment_knowledge, empowerment_abilities, empowerment_desires)) %>%
+  mutate(total_HBM = sum(total_behavior, total_perception)) %>%
+  mutate(total_PMT = sum(total_motivation, total_intention)) %>%
+  mutate(total_TPB = sum(total_norm, total_attitude)) %>%
+  mutate(total_SCT = sum(total_social, total_empowerment))
+
+
+summary(cc_tots)
+
+
+
+corrplot::corrplot(cor(tots_scale))
+summary(cc_tots)
+
+```
+
+```{r, train-test-split}
+set.seed(0522)
+
+sample <- sample.split(1:nrow(cc_df), SplitRatio = 0.8)
+train <- subset(cc_df, sample == TRUE)
+test <- subset(cc_df, sample == FALSE)
+```
+
+```{r, }
+
+
+os_train <- ovun.sample(ca_cervix~., train, method = 'over', p  = 0.5)
+cc_mod1 <- glm(os_train$data, formula = ca_cervix~., family = binomial(link = 'logit'))
+
+predicted1 <- predict(cc_mod1, test, type = 'response')
+
+optimal1 <- optimalCutoff(test$ca_cervix, predicted1[1])
+
+confusionMatrix(test$ca_cervix, predicted1)
+
+
+
+```
+
+
+```{r, train-test-split}
+
+
+sample <- sample.split(1:nrow(cc_tots), SplitRatio = 0.8)
+train <- subset(cc_tots, sample == TRUE)
+test <- subset(cc_tots, sample == FALSE)
+```
+
+```{r, }
+
+
+os_train <- ovun.sample(ca_cervix~., train, method = 'over', p  = 0.5)
+cc_mod2 <- glm(os_train$data, formula = ca_cervix~., family = binomial(link = 'logit'))
+
+predicted2<- predict(cc_mod1, test, type = 'response')
+
+optimal2 <- optimalCutoff(test$ca_cervix, predicted2[1])
+
+confusionMatrix(test$ca_cervix, predicted2)
+
+
+
+```
+
+
+
+
+```{r, pca-lm}
+
+
+
+pca_tots <- prcomp(train[-20], center = TRUE, scale = TRUE)
+
+summary(pca_tots)
+
+screeplot(pca_tots)
+
+```
+
+
+
+```{r, pca-train-test}
+
+library()
+pca_train <- predict(pca_tots, train)
+pca_train <- pca_train %>%
+  cbind(train[20])
+pca_train$ca_cervix <- as.factor(pca_train$ca_cervix)
+
+pca_test <- predict(pca_tots, test)
+pca_test <- pca_test %>%
+  cbind(test[20])
+
+pca_train
+pca_mod <- glm(data = pca_train, formula = ca_cervix ~ PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7, family = binomial(link = 'logit'))
+
+train_predictions <- predict(pca_mod, pca_train, type = 'response')
+table(round(train_predictions,0), as.numeric(pca_train$ca_cervix))
+
+test_predictions <- predict(pca_mod, pca_test, type = 'response')
+
+table(round(test_predictions,0), as.numeric(pca_test$ca_cervix))
+```
+
